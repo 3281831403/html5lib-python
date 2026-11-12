@@ -21,7 +21,10 @@ class TreeWalker(base.NonRecursiveTreeWalker):
                     attrs[(attr.namespaceURI, attr.localName)] = attr.value
                 else:
                     attrs[(None, attr.name)] = attr.value
-            return (base.ELEMENT, node.namespaceURI, node.nodeName,
+            # localName is None for elements created without a namespace; in
+            # that case nodeName is already the unqualified name
+            name = node.localName if node.namespaceURI else node.nodeName
+            return (base.ELEMENT, node.namespaceURI, name,
                     attrs, node.hasChildNodes())
 
         elif node.nodeType == Node.COMMENT_NODE:

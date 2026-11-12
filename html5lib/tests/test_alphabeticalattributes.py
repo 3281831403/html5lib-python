@@ -70,9 +70,13 @@ def test_with_serializer():
         quote_attr_values='always'
     )
 
-    # FIXME(willkg): The "xlink" namespace gets dropped by the serializer. When
-    # that gets fixed, we can fix this expected result.
+    # The serializer restores the qualified name from the attribute's
+    # namespace and adds the xmlns:xlink declaration needed to bind it. The
+    # svg element also gets a synthetic default xmlns declaration since the
+    # parsed fragment does not carry the original xmlns attribute.
     assert (
         ser.render(walker(dom)) ==
-        '<svg><pattern id="patt1" href="#patt2"></pattern></svg>'
+        '<svg xmlns="http://www.w3.org/2000/svg"><pattern id="patt1" '
+        'xlink:href="#patt2" xmlns:xlink="http://www.w3.org/1999/xlink">'
+        '</pattern></svg>'
     )

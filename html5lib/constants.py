@@ -2951,6 +2951,43 @@ prefixes = {v: k for k, v in namespaces.items()}
 prefixes["http://www.w3.org/1998/Math/MathML"] = "math"
 
 
+def getNamespacePrefixes(namespace, prefix_mapping):
+    """Return a stable, non-conflicting prefix for ``namespace``.
+
+    Well-known namespaces get the prefix used in HTML source (e.g. ``xlink``,
+    ``xml``); unknown namespaces get a generated ``nsN`` prefix. Any prefix
+    already present in ``prefix_mapping`` (which maps prefixes to namespace
+    URIs) is avoided, so the returned prefix can safely be declared with an
+    ``xmlns`` attribute and used in a qualified name.
+
+    :arg namespace: the namespace URI--must not be ``None``
+
+    :arg prefix_mapping: a mapping of prefixes already in scope to their
+        namespace URIs (the values may be ``None`` when only the prefix name
+        needs to be reserved); it is updated in place when a new prefix is
+        generated
+
+    :returns: the prefix as a string
+
+    """
+    if namespace in prefixes:
+        candidate = prefixes[namespace]
+        if candidate not in prefix_mapping or \
+                prefix_mapping[candidate] == namespace:
+            prefix_mapping[candidate] = namespace
+            return candidate
+
+    index = 0
+    while True:
+        candidate = "ns%d" % index
+        if candidate not in prefix_mapping:
+            break
+        index += 1
+
+    prefix_mapping[candidate] = namespace
+    return candidate
+
+
 class DataLossWarning(UserWarning):
     """Raised when the current tree is unable to represent the input data"""
     pass

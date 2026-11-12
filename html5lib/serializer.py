@@ -7,6 +7,7 @@ from codecs import register_error, xmlcharrefreplace_errors
 
 from .constants import voidElements, booleanAttributes, spaceCharacters
 from .constants import rcdataElements, entities, xmlEntities
+from .constants import namespaces, getNamespacePrefixes
 from . import treewalkers, _utils
 from xml.sax.saxutils import escape
 
@@ -235,11 +236,61 @@ class HTMLSerializer(object):
         else:
             return string
 
+    def _isForeignNamespace(self, namespace):
+        return bool(namespace) and namespace != namespaces["html"]
+
+    def _findPrefix(self, namespace):
+        """Return an in-scope prefix already bound to namespace, or None."""
+        for scope in reversed(self.namespace_scope_stack):
+            for prefix, uri in scope["prefixes"].items():
+                if uri == namespace:
+                    return prefix
+        return None
+
+    def _findDefaultNamespace(self):
+        """Return the in-scope default namespace URI, or None."""
+        for scope in reversed(self.namespace_scope_stack):
+            if scope["default"] is not None:
+                return scope["default"]
+        return None
+
+    def _qualifiedName(self, namespace, name, prefixes=None, default_ns=None):
+        """Return the qualified name (e.g. ``xlink:href``) for a token name.
+
+        Namespace declarations (the xmlns namespace) are rendered literally
+        rather than looked up, since the token only carries the local name.
+        Elements in the in-scope default namespace keep an unprefixed name.
+
+        :arg prefixes: mapping of namespace URI to prefix for the current
+            element
+        :arg default_ns: the current element's default namespace URI
+
+        """
+        if not self._isForeignNamespace(namespace):
+            return name
+        if namespace == namespaces["xmlns"]:
+            return name if name == "xmlns" else "xmlns:" + name
+        if namespace == namespaces["xml"]:
+            return "xml:" + name
+        if namespace == default_ns:
+            return name
+        if prefixes is None or namespace not in prefixes:
+            # No in-scope binding (e.g. an unbalanced EndTag); fall back to
+            # the unprefixed local name rather than raising a KeyError.
+            return name
+        return prefixes[namespace] + ":" + name
+
     def serialize(self, treewalker, encoding=None):
         # pylint:disable=too-many-nested-blocks
         self.encoding = encoding
         in_cdata = False
         self.errors = []
+        # Stack of namespace scopes, one dict per open foreign (non-HTML)
+        # element. Each scope has a "prefixes" map (prefix -> namespace URI)
+        # and a "default" key holding the default namespace URI (or None).
+        # HTML elements don't introduce a scope, preserving the previous
+        # serialization behavior for plain HTML trees.
+        self.namespace_scope_stack = []
 
         if encoding and self.inject_meta_charset:
             from .filters.inject_meta_charset import Filter
@@ -292,15 +343,118 @@ class HTMLSerializer(object):
                     yield self.encode(escape(token["data"]))
 
             elif type in ("StartTag", "EmptyTag"):
+                namespace = token.get("namespace")
                 name = token["name"]
-                yield self.encodeStrict("<%s" % name)
+                foreign = self._isForeignNamespace(namespace)
+                if foreign:
+                    # Prefixes explicitly declared by xmlns:prefix attributes
+                    # on this element: prefix -> namespace URI. They are
+                    # serialized verbatim and not re-declared synthetically.
+                    explicit_prefixes = {}
+                    # Default namespace declared by a bare xmlns attribute,
+                    # if any. Elements in this namespace keep an unprefixed
+                    # name.
+                    explicit_default = None
+                    for (attr_ns, attr_name), attr_value in token["data"].items():
+                        if attr_ns == namespaces["xmlns"]:
+                            if attr_name == "xmlns":
+                                explicit_default = attr_value
+                            else:
+                                explicit_prefixes[attr_name] = attr_value
+                        elif attr_ns is None and attr_name == "xmlns":
+                            explicit_default = attr_value
+                    default_ns = (explicit_default
+                                  if explicit_default is not None
+                                  else self._findDefaultNamespace())
+                    # If the element's namespace is not covered by an explicit
+                    # or inherited default namespace, declare it synthetically
+                    # so the serialized fragment keeps the element's ns.
+                    synthetic_default = None
+                    if namespace != default_ns and \
+                            self._findPrefix(namespace) is None and \
+                            not any(uri == namespace
+                                    for uri in explicit_prefixes.values()):
+                        synthetic_default = namespace
+                        default_ns = namespace
+                    # Namespace URIs needing a prefix on this element:
+                    # namespaced attributes other than xmlns declarations,
+                    # the built-in xml namespace and anything in the default
+                    # namespace (whose names stay unprefixed). The element
+                    # namespace is added only when it is not the default
+                    # namespace.
+                    needed = []
+                    if namespace != default_ns:
+                        needed.append(namespace)
+                    for attr_ns, attr_name in token["data"]:
+                        if (attr_ns and attr_ns != namespaces["xmlns"] and
+                                attr_ns != namespaces["xml"] and
+                                attr_ns != default_ns and
+                                attr_ns not in needed):
+                            needed.append(attr_ns)
+                    # Mapping of namespace URI -> prefix for this element,
+                    # including bindings inherited from ancestor scopes.
+                    element_prefixes = {}
+                    synthetic = {}
+                    for ns in needed:
+                        # Reuse an explicit prefix declaration (xmlns:foo=...)
+                        # on this element. Such a declaration shadows any
+                        # ancestor binding with the same prefix, so it is the
+                        # correct prefix for this namespace here.
+                        match = None
+                        for prefix, uri in explicit_prefixes.items():
+                            if uri == ns:
+                                match = prefix
+                                break
+                        if match is None:
+                            # ...otherwise reuse an in-scope ancestor binding
+                            # whose prefix isn't redeclared on this element...
+                            ancestor_match = self._findPrefix(ns)
+                            if ancestor_match is not None and \
+                                    ancestor_match not in explicit_prefixes:
+                                match = ancestor_match
+                        if match is None:
+                            # ...otherwise prefer the namespace's well-known
+                            # prefix (e.g. xlink) when it is not already taken
+                            # on this element, or generate a stable,
+                            # non-conflicting prefix and declare it.
+                            taken = set()
+                            for ancestor in self.namespace_scope_stack:
+                                taken.update(ancestor["prefixes"])
+                            taken.update(explicit_prefixes)
+                            taken.update(synthetic)
+                            match = getNamespacePrefixes(
+                                ns, dict((p, None) for p in taken))
+                            synthetic[match] = ns
+                        element_prefixes[ns] = match
+                    scope = {"prefixes": dict(explicit_prefixes),
+                             "default": default_ns}
+                    scope["prefixes"].update(synthetic)
+                    self.namespace_scope_stack.append(scope)
+                    qname = self._qualifiedName(namespace, name,
+                                                element_prefixes, default_ns)
+                else:
+                    qname = name
+                yield self.encodeStrict("<%s" % qname)
                 if name in rcdataElements and not self.escape_rcdata:
                     in_cdata = True
                 elif in_cdata:
                     self.serializeError("Unexpected child element of a CDATA element")
-                for (_, attr_name), attr_value in token["data"].items():
-                    # TODO: Add namespace support here
-                    k = attr_name
+                attrs = token["data"]
+                if foreign and self.alphabetical_attributes:
+                    # Sort by the qualified name that will actually be
+                    # serialized, rather than by (namespace URI, local name).
+                    attrs = sorted(attrs.items(),
+                                   key=lambda item: self._qualifiedName(
+                                       item[0][0], item[0][1],
+                                       element_prefixes, default_ns))
+                else:
+                    attrs = list(attrs.items())
+                for (attr_namespace, attr_name), attr_value in attrs:
+                    if foreign:
+                        k = self._qualifiedName(attr_namespace, attr_name,
+                                                element_prefixes, default_ns)
+                    else:
+                        k = attr_name
                     v = attr_value
                     yield self.encodeStrict(' ')
 
@@ -337,6 +491,18 @@ class HTMLSerializer(object):
                             yield self.encodeStrict(quote_char)
                         else:
                             yield self.encode(v)
+                if foreign:
+                    # Synthetic xmlns declarations emitted before the tag
+                    # closes: the default namespace (when the element's
+                    # namespace was not already declared) and any generated
+                    # prefixes. Explicit xmlns attributes are emitted with the
+                    # regular attributes above.
+                    if synthetic_default is not None:
+                        yield self.encodeStrict(
+                            ' xmlns="%s"' % synthetic_default)
+                    for prefix, uri in sorted(synthetic.items()):
+                        yield self.encodeStrict(
+                            ' xmlns:%s="%s"' % (prefix, uri))
                 if name in voidElements and self.use_trailing_solidus:
                     if self.space_before_trailing_solidus:
                         yield self.encodeStrict(" /")
@@ -345,12 +511,29 @@ class HTMLSerializer(object):
                 yield self.encode(">")
 
             elif type == "EndTag":
+                namespace = token.get("namespace")
                 name = token["name"]
                 if name in rcdataElements:
                     in_cdata = False
                 elif in_cdata:
                     self.serializeError("Unexpected child element of a CDATA element")
-                yield self.encodeStrict("</%s>" % name)
+                if self._isForeignNamespace(namespace):
+                    if self.namespace_scope_stack:
+                        scope = self.namespace_scope_stack[-1]
+                        qname = self._qualifiedName(
+                            namespace, name,
+                            dict((uri, prefix)
+                                 for prefix, uri in scope["prefixes"].items()),
+                            scope["default"])
+                    else:
+                        # Unbalanced EndTag with no matching StartTag.
+                        qname = self._qualifiedName(namespace, name, {}, None)
+                else:
+                    qname = name
+                yield self.encodeStrict("</%s>" % qname)
+                if self._isForeignNamespace(namespace) and \
+                        self.namespace_scope_stack:
+                    self.namespace_scope_stack.pop()
 
             elif type == "Comment":
                 data = token["data"]

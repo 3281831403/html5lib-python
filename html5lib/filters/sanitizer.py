@@ -15,7 +15,7 @@ from xml.sax.saxutils import escape, unescape
 from six.moves import urllib_parse as urlparse
 
 from . import base
-from ..constants import namespaces, prefixes
+from ..constants import namespaces, prefixes, getNamespacePrefixes
 
 __all__ = ["Filter"]
 
@@ -881,8 +881,19 @@ class Filter(base.Filter):
         elif token["data"]:
             assert token_type in ("StartTag", "EmptyTag")
             attrs = []
+            # Track generated prefixes so several attributes in the same
+            # unknown namespace get a stable, non-conflicting prefix instead
+            # of raising a KeyError on namespaces outside constants.prefixes.
+            generated_prefixes = {}
             for (ns, name), v in token["data"].items():
-                attrs.append(' %s="%s"' % (name if ns is None else "%s:%s" % (prefixes[ns], name), escape(v)))
+                if ns is None:
+                    attr_name = name
+                else:
+                    prefix = prefixes.get(ns)
+                    if prefix is None:
+                        prefix = getNamespacePrefixes(ns, generated_prefixes)
+                    attr_name = "%s:%s" % (prefix, name)
+                attrs.append(' %s="%s"' % (attr_name, escape(v)))
             token["data"] = "<%s%s>" % (token["name"], ''.join(attrs))
         else:
             token["data"] = "<%s>" % token["name"]

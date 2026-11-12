@@ -1,0 +1,179 @@
+{
+  "tests": [
+    {
+      "description": "svg element with explicit default and xlink xmlns declarations",
+      "expected": [
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\"><use xlink:href=#a xml:lang=en></use></svg>"
+      ],
+      "input": [
+        [
+          "StartTag",
+          "http://www.w3.org/2000/svg",
+          "svg",
+          [
+            {
+              "name": "xmlns",
+              "namespace": "http://www.w3.org/2000/xmlns/",
+              "value": "http://www.w3.org/2000/svg"
+            },
+            {
+              "name": "xlink",
+              "namespace": "http://www.w3.org/2000/xmlns/",
+              "value": "http://www.w3.org/1999/xlink"
+            }
+          ]
+        ],
+        [
+          "StartTag",
+          "http://www.w3.org/2000/svg",
+          "use",
+          [
+            {
+              "name": "href",
+              "namespace": "http://www.w3.org/1999/xlink",
+              "value": "#a"
+            },
+            {
+              "name": "lang",
+              "namespace": "http://www.w3.org/XML/1998/namespace",
+              "value": "en"
+            }
+          ]
+        ],
+        [
+          "EndTag",
+          "http://www.w3.org/2000/svg",
+          "use"
+        ],
+        [
+          "EndTag",
+          "http://www.w3.org/2000/svg",
+          "svg"
+        ]
+      ]
+    },
+    {
+      "description": "mathml fragment without xmlns declarations gets synthetic declarations",
+      "expected": [
+        "<math xmlns=\"http://www.w3.org/1998/Math/MathML\"><mi xml:lang=fr>x</mi></math>"
+      ],
+      "input": [
+        [
+          "StartTag",
+          "http://www.w3.org/1998/Math/MathML",
+          "math",
+          []
+        ],
+        [
+          "StartTag",
+          "http://www.w3.org/1998/Math/MathML",
+          "mi",
+          [
+            {
+              "name": "lang",
+              "namespace": "http://www.w3.org/XML/1998/namespace",
+              "value": "fr"
+            }
+          ]
+        ],
+        [
+          "Characters",
+          "x"
+        ],
+        [
+          "EndTag",
+          "http://www.w3.org/1998/Math/MathML",
+          "mi"
+        ],
+        [
+          "EndTag",
+          "http://www.w3.org/1998/Math/MathML",
+          "math"
+        ]
+      ]
+    },
+    {
+      "description": "unknown namespaces get stable generated prefixes",
+      "expected": [
+        "<wrap xmlns=\"http://example.com/unknown\"><thing ns0:attr=v xmlns:ns0=\"http://example.com/other\"></thing></wrap>"
+      ],
+      "input": [
+        [
+          "StartTag",
+          "http://example.com/unknown",
+          "wrap",
+          []
+        ],
+        [
+          "StartTag",
+          "http://example.com/unknown",
+          "thing",
+          [
+            {
+              "name": "attr",
+              "namespace": "http://example.com/other",
+              "value": "v"
+            }
+          ]
+        ],
+        [
+          "EndTag",
+          "http://example.com/unknown",
+          "thing"
+        ],
+        [
+          "EndTag",
+          "http://example.com/unknown",
+          "wrap"
+        ]
+      ]
+    },
+    {
+      "description": "prefix conflict: xlink prefix bound to another URI",
+      "expected": [
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://example.com/not-xlink\"><use ns0:href=#a xmlns:ns0=\"http://www.w3.org/1999/xlink\"></use></svg>"
+      ],
+      "input": [
+        [
+          "StartTag",
+          "http://www.w3.org/2000/svg",
+          "svg",
+          [
+            {
+              "name": "xmlns",
+              "namespace": "http://www.w3.org/2000/xmlns/",
+              "value": "http://www.w3.org/2000/svg"
+            },
+            {
+              "name": "xlink",
+              "namespace": "http://www.w3.org/2000/xmlns/",
+              "value": "http://example.com/not-xlink"
+            }
+          ]
+        ],
+        [
+          "StartTag",
+          "http://www.w3.org/2000/svg",
+          "use",
+          [
+            {
+              "name": "href",
+              "namespace": "http://www.w3.org/1999/xlink",
+              "value": "#a"
+            }
+          ]
+        ],
+        [
+          "EndTag",
+          "http://www.w3.org/2000/svg",
+          "use"
+        ],
+        [
+          "EndTag",
+          "http://www.w3.org/2000/svg",
+          "svg"
+        ]
+      ]
+    }
+  ]
+}

@@ -173,7 +173,11 @@ class TreeWalker(base.NonRecursiveTreeWalker):
                 if match:
                     attrs[(match.group(1), match.group(2))] = value
                 else:
-                    attrs[(None, name)] = value
+                    # The lxml treebuilder escapes characters that are not
+                    # legal in XML names (e.g. the colon in "xlink:href" for
+                    # an HTML-context attribute); undo that so the walker
+                    # output matches the etree and DOM walkers.
+                    attrs[(None, self.filter.fromXmlName(name))] = value
             return (base.ELEMENT, namespace, self.filter.fromXmlName(tag),
                     attrs, len(node) > 0 or node.text)
 
